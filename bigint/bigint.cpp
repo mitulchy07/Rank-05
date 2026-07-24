@@ -1,185 +1,188 @@
 #include "bigint.hpp"
-#include <algorithm>
-#include <stdexcept>
 
-bigint::bigint() : digits("0") {}
-
-bigint::bigint(unsigned int value)
+bigint::bigint() : str("0")
 {
-    if (value == 0)
-        digits = "0";
-
-    while (value > 0)
-    {
-        digits += static_cast<char>('0' + value % 10);
-        value /= 10;
-    }
-    std::reverse(digits.begin(), digits.end());
 }
 
-bool bigint::read_shift(std::size_t limit, std::size_t& value) const
+bigint::bigint(unsigned int number) : str("0")
 {
-    value = 0;
-    for (std::size_t i = 0; i < digits.size(); ++i)
-    {
-        unsigned int digit = digits[i] - '0';
+	if (number == 0)
+		return;
 
-        if (value > limit / 10
-            || (value == limit / 10 && digit > limit % 10))
-            return false;
-        value = value * 10 + digit;
-    }
-    return true;
+	std::string digits;
+	while (number > 0)
+	{
+		digits = char('0' + number % 10) + digits;
+		number /= 10;
+	}
+	str = digits;
 }
 
-bigint& bigint::operator+=(const bigint& other)
+bigint::bigint(const bigint& source) : str(source.str)
 {
-    std::string result;
-    int i = static_cast<int>(digits.size()) - 1;
-    int j = static_cast<int>(other.digits.size()) - 1;
-    int carry = 0;
+}
 
-    while (i >= 0 || j >= 0 || carry)
-    {
-        int sum = carry;
+bigint& bigint::operator=(const bigint& source)
+{
+	if (this != &source)
+		str = source.str;
+	return *this;
+}
 
-        if (i >= 0)
-            sum += digits[i--] - '0';
-        if (j >= 0)
-            sum += other.digits[j--] - '0';
-        result += static_cast<char>('0' + sum % 10);
-        carry = sum / 10;
-    }
-    std::reverse(result.begin(), result.end());
-    digits = result;
-    return *this;
+std::string bigint::getStr() const
+{
+	return str;
+}
+
+// Strip leading zeros, but always keep at least one digit ("0" stays "0")
+void bigint::normalize()
+{
+	size_t firstNonZero = 0;
+	while (firstNonZero + 1 < str.size() && str[firstNonZero] == '0')
+		firstNonZero++;
+	if (firstNonZero > 0)
+		str.erase(0, firstNonZero);
+}
+
+// Add two decimal number-strings, digit by digit, right to left, with carry
+static std::string addStrings(const std::string& a, const std::string& b)
+{
+	std::string result;
+	int i = a.size() - 1;
+	int j = b.size() - 1;
+	int carry = 0;
+
+	while (i >= 0 || j >= 0 || carry)
+	{
+		int sum = carry;
+		if (i >= 0)
+			sum += a[i--] - '0';
+		if (j >= 0)
+			sum += b[j--] - '0';
+		carry = sum / 10;
+		result = char(sum % 10 + '0') + result;
+	}
+	return result.empty() ? "0" : result;
 }
 
 bigint bigint::operator+(const bigint& other) const
 {
-    bigint result(*this);
-
-    result += other;
-    return result;
+	bigint result;
+	result.str = addStrings(str, other.str);
+	result.normalize();
+	return result;
 }
 
-bigint& bigint::operator++()
+bigint& bigint::operator+=(const bigint& other)
 {
-    return *this += bigint(1);
+	return *this = *this + other;
 }
 
-bigint bigint::operator++(int)
+bigint& bigint::operator++() // prefix ++x
 {
-    bigint old(*this);
-
-    ++(*this);
-    return old;
+	return *this += bigint(1);
 }
 
-bigint& bigint::operator<<=(unsigned int shift)
+bigint bigint::operator++(int) // postfix x++
 {
-    if (digits != "0")
-        digits.append(shift, '0');
-    return *this;
+	bigint old = *this;
+	++(*this);
+	return old;
 }
 
-bigint& bigint::operator<<=(const bigint& shift)
+// Digit-shift left: append n zeros (e.g. 42 << 3 == 42000)
+bigint bigint::operator<<(unsigned int n) const
 {
-    std::size_t amount;
-    std::size_t limit = digits.max_size() - digits.size();
-
-    if (!shift.read_shift(limit, amount))
-        throw std::length_error("bigint shift is too large");
-    if (digits != "0")
-        digits.append(amount, '0');
-    return *this;
+	bigint result = *this;
+	if (result.str != "0")
+		result.str.append(n, '0');
+	return result;
 }
 
-bigint bigint::operator<<(unsigned int shift) const
+bigint& bigint::operator<<=(unsigned int n)
 {
-    bigint result(*this);
-
-    result <<= shift;
-    return result;
+	return *this = *this << n;
 }
 
-bigint bigint::operator<<(const bigint& shift) const
+// Digit-shift right: drop the last n digits (e.g. 1337 >> 2 == 13)
+bigint bigint::operator>>(unsigned int n) const
 {
-    bigint result(*this);
-
-    result <<= shift;
-    return result;
+	bigint result = *this;
+	if (n >= result.str.size())
+		result.str = "0";
+	else
+		result.str.erase(result.str.size() - n, n);
+	result.normalize();
+	return result;
 }
 
-bigint& bigint::operator>>=(unsigned int shift)
+bigint& bigint::operator>>=(unsigned int n)
 {
-    if (shift >= digits.size())
-        digits = "0";
-    else
-        digits.erase(digits.size() - shift);
-    return *this;
+	return *this = *this >> n;
 }
 
-bigint& bigint::operator>>=(const bigint& shift)
+// Convert a decimal string to unsigned int, used by the bigint-shift overloads
+static unsigned int toUnsignedInt(const std::string& s)
 {
-    std::size_t amount;
-
-    if (!shift.read_shift(digits.size() - 1, amount))
-        digits = "0";
-    else
-        digits.erase(digits.size() - amount);
-    return *this;
+	unsigned int value = 0;
+	for (size_t i = 0; i < s.size(); i++)
+		value = value * 10 + (s[i] - '0');
+	return value;
 }
 
-bigint bigint::operator>>(unsigned int shift) const
+bigint bigint::operator<<(const bigint& other) const
 {
-    bigint result(*this);
-
-    result >>= shift;
-    return result;
+	return *this << toUnsignedInt(other.str);
 }
 
-bigint bigint::operator>>(const bigint& shift) const
+bigint& bigint::operator<<=(const bigint& other)
 {
-    bigint result(*this);
-
-    result >>= shift;
-    return result;
+	return *this = *this << other;
 }
 
-bool bigint::operator<(const bigint& other) const
+bigint bigint::operator>>(const bigint& other) const
 {
-    if (digits.size() != other.digits.size())
-        return digits.size() < other.digits.size();
-    return digits < other.digits;
+	return *this >> toUnsignedInt(other.str);
+}
+
+bigint& bigint::operator>>=(const bigint& other)
+{
+	return *this = *this >> other;
 }
 
 bool bigint::operator==(const bigint& other) const
 {
-    return digits == other.digits;
+	return str == other.str;
 }
 
 bool bigint::operator!=(const bigint& other) const
 {
-    return !(*this == other);
+	return !(*this == other);
 }
 
-bool bigint::operator<=(const bigint& other) const
+bool bigint::operator<(const bigint& other) const
 {
-    return !(other < *this);
+	if (str.size() != other.str.size())
+		return str.size() < other.str.size();
+	return str < other.str;
 }
 
 bool bigint::operator>(const bigint& other) const
 {
-    return other < *this;
+	return other < *this;
+}
+
+bool bigint::operator<=(const bigint& other) const
+{
+	return !(other < *this);
 }
 
 bool bigint::operator>=(const bigint& other) const
 {
-    return !(*this < other);
+	return !(*this < other);
 }
 
-std::ostream& operator<<(std::ostream& out, const bigint& value)
+std::ostream& operator<<(std::ostream& os, const bigint& obj)
 {
-    return out << value.digits;
+	return os << obj.getStr();
 }
